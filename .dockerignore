@@ -1,0 +1,13 @@
+# Keep the build context small and the build reproducible: nothing generated or secret goes into an image.
+**/node_modules
+**/dist
+**/build
+**/coverage
+**/.env
+**/*.tsbuildinfo
+.git
+*.zip
+docs
+e2e
+infra
+contracts

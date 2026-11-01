@@ -1,0 +1,5 @@
+# Keep LF everywhere: shell scripts / YAML mounted into Linux containers break with CRLF.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.webp binary

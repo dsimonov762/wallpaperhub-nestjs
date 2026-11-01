@@ -1,0 +1,175 @@
+# Wallpaper Hub infrastructure.  Start with:  pnpm infra:up   (from the repo root)
+# Profiles: infra (databases, broker, identity) | apps (our services, built from source) | observability (later)
+#   pnpm infra:up   only the infrastructure; run the services on your machine with pnpm account:dev
+#   pnpm apps:up    infrastructure AND the services in containers (do not run pnpm account:dev at the same time: same ports)
+# Every port is published on 127.0.0.1 only. Host ports avoid clashes with services you run on the host:
+#   account-service 8080/8081, so Schema Registry uses 8085 and Keycloak uses 8180.
+
+name: wallpaperhub-nest-express
+
+services:
+  account-db:
+    profiles: [infra]
+    image: postgres:18.6-trixie
+    environment:
+      POSTGRES_DB: ${ACCOUNT_DB_NAME:-account}
+      POSTGRES_USER: ${ACCOUNT_DB_USER:-account}
+      POSTGRES_PASSWORD: ${ACCOUNT_DB_PASSWORD:-account}
+    ports: ["127.0.0.1:5433:5432"]
+    volumes: [account-db-data:/var/lib/postgresql]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${ACCOUNT_DB_USER:-account} -d ${ACCOUNT_DB_NAME:-account}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    profiles: [infra]
+    image: redis:8.8.3-trixie
+    ports: ["127.0.0.1:6379:6379"]
+    volumes: [redis-data:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  kafka:
+    profiles: [infra]
+    image: confluentinc/cp-kafka:8.2.4
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
+    ports: ["127.0.0.1:9094:9094"] # host apps connect to localhost:9094; containers use kafka:9092
+    volumes: [kafka-data:/var/lib/kafka/data]
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+
+  # One-shot job: creates the event topics (3 partitions) and exits. "Exited (0)" in `docker ps` is normal.
+  kafka-init:
+    profiles: [infra]
+    image: confluentinc/cp-kafka:8.2.4
+    depends_on:
+      kafka: { condition: service_healthy }
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        for t in account.user.registered.v1 account.user.profile-updated.v1 account.user.deleted.v1; do
+          kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic $$t --partitions 3 --replication-factor 1
+        done
+
+  schema-registry:
+    profiles: [infra]
+    image: confluentinc/cp-schema-registry:8.2.4
+    depends_on:
+      kafka: { condition: service_healthy }
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:9092
+      SCHEMA_REGISTRY_SCHEMA_COMPATIBILITY_LEVEL: BACKWARD
+      KAFKA_HEAP_OPTS: -Xms128m -Xmx384m
+    ports: ["127.0.0.1:8085:8081"]
+
+  keycloak-db:
+    profiles: [infra]
+    image: postgres:18.6-trixie
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD:-keycloak}
+    volumes: [keycloak-db-data:/var/lib/postgresql]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  keycloak:
+    profiles: [infra]
+    image: quay.io/keycloak/keycloak:26.7.0
+    command: ["start-dev", "--import-realm"] # DEV mode: plain HTTP, realm imported on first start
+    depends_on:
+      keycloak-db: { condition: service_healthy }
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:-keycloak}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KC_HTTP_PORT: 8080
+      KC_HOSTNAME_STRICT: "false"
+      JAVA_OPTS_KC_HEAP: -Xms256m -Xmx768m
+    ports: ["127.0.0.1:8180:8080"]
+    volumes: ["./keycloak:/opt/keycloak/data/import:ro"]
+
+  # ---- our services (profile: apps) -----------------------------------------------------------------------------------
+  # They need the infrastructure above, so always start both profiles together: `pnpm apps:up`.
+
+  # One-shot job: applies the database migrations and exits (same image as the service, different command).
+  account-migrate:
+    profiles: [apps]
+    build: &account-build
+      context: ..
+      dockerfile: services/account/ts-nestjs/Dockerfile
+    image: wallpaper-hub/account-service:dev
+    command: ["node", "dist/migrate.js"]
+    depends_on:
+      account-db: { condition: service_healthy }
+    environment: &account-env
+      APP_PROFILE: local
+      LOG_PRETTY: "false" # pretty logs need a development-only package that is not in the image
+      HOST: 0.0.0.0
+      DB_HOST: account-db
+      DB_PORT: 5432
+      DB_NAME: ${ACCOUNT_DB_NAME:-account}
+      DB_USER: ${ACCOUNT_DB_USER:-account}
+      DB_PASSWORD: ${ACCOUNT_DB_PASSWORD:-account}
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKERS: kafka:9092
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      # Tokens carry the address clients used to reach Keycloak (localhost:8180 from your browser/curl) as their issuer;
+      # the service itself reaches Keycloak by its container name.
+      AUTH_ISSUER: http://localhost:8180/realms/wallpaperhub
+      AUTH_JWKS_URL: http://keycloak:8080/realms/wallpaperhub/protocol/openid-connect/certs
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_REALM: wallpaperhub
+      KEYCLOAK_CLIENT_SECRET: ${ACCOUNT_KEYCLOAK_CLIENT_SECRET:-dev-secret-account-svc}
+    restart: "no"
+
+  account-service:
+    profiles: [apps]
+    build: *account-build
+    image: wallpaper-hub/account-service:dev
+    init: true # a tiny init process as PID 1: forwards SIGTERM and reaps zombies, so shutdown is graceful
+    depends_on:
+      account-migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+    environment: *account-env
+    ports:
+      - "127.0.0.1:8080:8080" # public HTTP API (+ Swagger UI at /api/docs in the local profile)
+      - "127.0.0.1:8081:8081" # management: /health/*, /management/*
+      - "127.0.0.1:9090:9090" # internal gRPC
+    restart: unless-stopped
+
+volumes:
+  account-db-data:
+  redis-data:
+  kafka-data:
+  keycloak-db-data:

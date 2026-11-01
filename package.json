@@ -1,0 +1,25 @@
+{
+  "name": "wallpaper-hub",
+  "private": true,
+  "description": "Wallpaper Hub - polyglot microservice reference (TypeScript / NestJS implementation)",
+  "packageManager": "pnpm@12.15.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "infra:up": "docker compose -f infra/docker-compose.yml --profile infra up -d",
+    "infra:down": "docker compose -f infra/docker-compose.yml --profile infra down",
+    "infra:ps": "docker compose -f infra/docker-compose.yml --profile infra ps",
+    "apps:up": "docker compose -f infra/docker-compose.yml --profile infra --profile apps up -d --build",
+    "apps:down": "docker compose -f infra/docker-compose.yml --profile infra --profile apps down",
+    "apps:logs": "docker compose -f infra/docker-compose.yml --profile infra --profile apps logs -f account-service",
+    "apps:stop": "docker compose -f infra/docker-compose.yml --profile infra --profile apps stop account-service",
+    "apps:ps": "docker compose -f infra/docker-compose.yml --profile infra --profile apps ps -a",
+    "e2e:smoke": "node e2e/smoke-account.mjs",
+    "account": "pnpm --filter account-service",
+    "account:dev": "pnpm --filter account-service start:dev",
+    "account:test": "pnpm --filter account-service test",
+    "account:migrate": "pnpm --filter account-service migrate",
+    "ci:account": "pnpm --filter account-service check && pnpm --filter account-service openapi:check"
+  }
+}

@@ -1,0 +1,23 @@
+# catalog-service GraphQL contract (README 5.5). Filled in during Phase 3.
+type Query {
+  wallpaper(id: ID!): Wallpaper
+  wallpapers(filter: WallpaperFilter, first: Int = 20, after: String): WallpaperConnection!
+  search(q: String!, facets: [FacetKey!], first: Int = 20, after: String): SearchResult!
+  me: Me!
+}
+
+type Mutation {
+  favoriteWallpaper(id: ID!): Wallpaper!
+  unfavoriteWallpaper(id: ID!): Wallpaper!
+}
+
+type Wallpaper {
+  id: ID!
+  title: String!
+  tags: [String!]!
+  variants: [Variant!]!
+  author: Author! # resolved through a DataLoader -> one GetUsersByIds gRPC call
+  favoriteCount: Int!
+}
+# Types referenced above (WallpaperFilter, WallpaperConnection, SearchResult, FacetKey,
+# Me, Variant, Author) are defined in Phase 3.
