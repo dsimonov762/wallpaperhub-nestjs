@@ -135,7 +135,7 @@ jobs:
           compose="docker compose -f infra/docker-compose.yml --profile infra"
           $compose up -d kafka schema-registry kafka-init
           for _ in $(seq 1 60); do
-            topics=$($compose exec -T kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list 2>/dev/null | grep -c '^account\.user\.' || true)
+            topics=$($compose exec -T kafka kafka-topics --bootstrap-server localhost:9092 --list 2>/dev/null | grep -c '^account\.user\.' || true)
             if [ "$topics" -ge 3 ] && curl -sf http://localhost:8085/subjects > /dev/null; then exit 0; fi
             sleep 2
           done
