@@ -45,7 +45,7 @@ env:
 jobs:
   verify:
     name: Check (types, lint, format, unit tests, OpenAPI contract)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -70,7 +70,7 @@ jobs:
   integration:
     name: Integration tests (PostgreSQL + Redis)
     needs: verify
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     services:
       postgres:
@@ -103,7 +103,7 @@ jobs:
   kafka:
     name: Events on real Kafka (Avro + Schema Registry)
     needs: verify
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     services:
       postgres:
@@ -134,8 +134,10 @@ jobs:
         run: |
           compose="docker compose -f infra/docker-compose.yml --profile infra"
           $compose up -d kafka schema-registry kafka-init
+          # The cp-kafka image has the tools on PATH without the .sh suffix (same as kafka-init in the compose file).
+          # stderr is NOT silenced, so a wrong command shows up in the log instead of looking like "not ready".
           for _ in $(seq 1 60); do
-            topics=$($compose exec -T kafka kafka-topics --bootstrap-server localhost:9092 --list 2>/dev/null | grep -c '^account\.user\.' || true)
+            topics=$($compose exec -T kafka kafka-topics --bootstrap-server localhost:9092 --list | grep -c '^account\.user\.' || true)
             if [ "$topics" -ge 3 ] && curl -sf http://localhost:8085/subjects > /dev/null; then exit 0; fi
             sleep 2
           done
@@ -151,7 +153,7 @@ jobs:
   stack:
     name: Docker image and full stack smoke test
     needs: [verify, integration]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -189,7 +191,7 @@ jobs:
 
   audit:
     name: Dependency audit (production)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -206,7 +208,7 @@ jobs:
     name: CI passed
     if: always()
     needs: [verify, integration, kafka, stack, audit]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - name: Every job must have succeeded
         env:
