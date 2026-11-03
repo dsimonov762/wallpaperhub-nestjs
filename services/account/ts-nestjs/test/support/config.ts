@@ -77,7 +77,18 @@ export function testConfig(over: Overrides = {}): AppConfig {
       cooldownMs: 5000,
       ...over.cache,
     },
-    grpc: { enabled: false, streamPageSize: 500, ...over.grpc },
+    grpc: {
+      enabled: false,
+      streamPageSize: 500,
+      tls: {
+        mode: 'off',
+        certFile: '',
+        keyFile: '',
+        caFile: '',
+        allowedClients: [],
+      },
+      ...over.grpc,
+    },
     jobs: {
       enabled: false,
       intervalMinutes: 60,

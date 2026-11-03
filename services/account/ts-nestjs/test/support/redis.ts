@@ -12,7 +12,7 @@ export async function startTestRedis(): Promise<TestRedis> {
   if (process.env.TEST_REDIS_URL)
     return { url: process.env.TEST_REDIS_URL, stop: async () => {} };
   const { GenericContainer, Wait } = await import('testcontainers');
-  const container = await new GenericContainer('redis:8.8.3-trixie')
+  const container = await new GenericContainer('redis:8.10-trixie')
     .withExposedPorts(6379)
     .withWaitStrategy(Wait.forLogMessage(/Ready to accept connections/))
     .start();

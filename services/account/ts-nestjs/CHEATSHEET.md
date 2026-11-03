@@ -67,7 +67,10 @@
 | End-to-end smoke test through the public interfaces | `e2e/smoke-account.mjs` (`pnpm e2e:smoke` from the repository root) |
 | CI pipeline | `.github/workflows/account-service.yml` (repository root), explained in `docs/CI.md` |
 | The CI `verify` job on your machine | `pnpm ci:account` (repository root) |
+| gRPC TLS: settings validation, certificate loader, expiry info | `src/config/config.ts` (GRPC_TLS_*), `src/api/grpc/tls.ts`, `tls-status.ts`; served at `GET :8081/management/tls` |
+| Client allowlist (mTLS) and caller identity | `src/api/grpc/peer-identity.ts`, the rpc branch of `src/security/auth.guard.ts` |
+| Development certificate authority | `scripts/pki.mjs` (library), `scripts/dev-certs.mjs` (`pnpm tls:dev-certs`), output in `infra/tls/dev/` |
 | Unit tests | `src/**/*.spec.ts` |
-| Integration tests (real PostgreSQL + Redis) | `test/db.e2e-spec.ts`, `test/users.e2e-spec.ts`, `test/messaging.e2e-spec.ts`, `test/grpc.e2e-spec.ts`, `test/cache.e2e-spec.ts`, `test/openapi.e2e-spec.ts` |
+| Integration tests (real PostgreSQL + Redis) | `test/db.e2e-spec.ts`, `test/users.e2e-spec.ts`, `test/messaging.e2e-spec.ts`, `test/grpc.e2e-spec.ts`, `test/cache.e2e-spec.ts`, `test/openapi.e2e-spec.ts`, `test/grpc-tls.e2e-spec.ts` |
 | Real Kafka test (needs `pnpm infra:up`) | `test/kafka.kafka-spec.ts` (`pnpm test:kafka`) |
 

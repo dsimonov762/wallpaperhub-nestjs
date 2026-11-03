@@ -5,7 +5,7 @@
 # Every port is published on 127.0.0.1 only. Host ports avoid clashes with services you run on the host:
 #   account-service 8080/8081, so Schema Registry uses 8085 and Keycloak uses 8180.
 
-name: wallpaperhub-nest-express
+name: wallpaperhub-nestjs
 
 services:
   account-db:
@@ -25,7 +25,7 @@ services:
 
   redis:
     profiles: [infra]
-    image: redis:8.8.3-trixie
+    image: redis:8.10-trixie
     ports: ["127.0.0.1:6379:6379"]
     volumes: [redis-data:/data]
     healthcheck:
@@ -36,7 +36,7 @@ services:
 
   kafka:
     profiles: [infra]
-    image: confluentinc/cp-kafka:8.2.4
+    image: confluentinc/cp-kafka:8.4.0 # single node, KRaft mode (no ZooKeeper)
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
@@ -62,7 +62,7 @@ services:
   # One-shot job: creates the event topics (3 partitions) and exits. "Exited (0)" in `docker ps` is normal.
   kafka-init:
     profiles: [infra]
-    image: confluentinc/cp-kafka:8.2.4
+    image: confluentinc/cp-kafka:8.4.0
     depends_on:
       kafka: { condition: service_healthy }
     restart: "no"
@@ -75,7 +75,7 @@ services:
 
   schema-registry:
     profiles: [infra]
-    image: confluentinc/cp-schema-registry:8.2.4
+    image: confluentinc/cp-schema-registry:8.4.0
     depends_on:
       kafka: { condition: service_healthy }
     environment:
@@ -108,7 +108,7 @@ services:
 
   keycloak:
     profiles: [infra]
-    image: quay.io/keycloak/keycloak:26.7.0
+    image: keycloak/keycloak:26.8
     command: ["start-dev", "--import-realm"] # DEV mode: plain HTTP, realm imported on first start
     depends_on:
       keycloak-db: { condition: service_healthy }
@@ -167,11 +167,21 @@ services:
     depends_on:
       account-migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
-    environment: *account-env
+    environment:
+      <<: *account-env
+      # gRPC with mutual TLS: clients need a certificate signed by our dev CA AND be on the allowlist (and send a token).
+      # The certificates come from `pnpm tls:dev-certs` (pnpm apps:up runs it first); they are DEVELOPMENT ONLY.
+      GRPC_TLS_MODE: mtls
+      GRPC_TLS_CERT_FILE: /etc/tls/server.crt
+      GRPC_TLS_KEY_FILE: /etc/tls/server.key
+      GRPC_TLS_CA_FILE: /etc/tls/ca.crt
+      GRPC_TLS_ALLOWED_CLIENTS: catalog-svc,notification-svc
+    volumes:
+      - ./tls/dev:/etc/tls:ro
     ports:
       - "127.0.0.1:8080:8080" # public HTTP API (+ Swagger UI at /api/docs in the local profile)
       - "127.0.0.1:8081:8081" # management: /health/*, /management/*
-      - "127.0.0.1:9090:9090" # internal gRPC
+      - "127.0.0.1:9090:9090" # internal gRPC (mutual TLS)
     restart: unless-stopped
 
 volumes:

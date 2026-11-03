@@ -53,7 +53,17 @@ export interface AccountClient {
   close(): void;
 }
 
-export function accountClient(address: string): AccountClient {
+export interface ClientTls {
+  /** PEM of the authority the client trusts for the SERVER certificate (omit: the system roots). */
+  ca?: string;
+  /** PEM client certificate and key, for mutual TLS. */
+  cert?: string;
+  key?: string;
+  /** Pretend the server is called this (to test host name verification). */
+  serverName?: string;
+}
+
+export function accountClient(address: string, tls?: ClientTls): AccountClient {
   const definition = protoLoader.loadSync(PROTO, {
     keepCase: false,
     longs: String,
@@ -62,9 +72,17 @@ export function accountClient(address: string): AccountClient {
     oneofs: true,
   });
   const pkg = grpc.loadPackageDefinition(definition) as any;
+  const credentials = tls
+    ? grpc.credentials.createSsl(
+        tls.ca ? Buffer.from(tls.ca) : null,
+        tls.key ? Buffer.from(tls.key) : null,
+        tls.cert ? Buffer.from(tls.cert) : null,
+      )
+    : grpc.credentials.createInsecure();
   const client = new pkg.wallpaperhub.account.v1.AccountService(
     address,
-    grpc.credentials.createInsecure(),
+    credentials,
+    tls?.serverName ? { 'grpc.ssl_target_name_override': tls.serverName } : {},
   );
 
   const md = (token?: string, extra: Record<string, string> = {}) => {

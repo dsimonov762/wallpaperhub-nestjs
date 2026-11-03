@@ -27,7 +27,8 @@
     "contracts:sync": "node -e \"const f=require('node:fs');for(const d of ['i18n','avro','proto'])f.cpSync('../../../contracts/'+d,'src/resources/'+d,{recursive:true})\"",
     "test:kafka": "vitest run --config ./vitest.config.kafka.ts",
     "openapi:generate": "nest build && node dist/openapi/cli.js generate",
-    "openapi:check": "nest build && node dist/openapi/cli.js check"
+    "openapi:check": "nest build && node dist/openapi/cli.js check",
+    "tls:dev-certs": "node scripts/dev-certs.mjs"
   },
   "dependencies": {
     "@fastify/static": "^10.1.8",
@@ -58,6 +59,7 @@
     "@nestjs/cli": "^12.0.10",
     "@nestjs/schematics": "^12.0.10",
     "@nestjs/testing": "^12.2.0",
+    "@peculiar/x509": "^3.1.0",
     "@testcontainers/postgresql": "^12.2.1",
     "@testcontainers/redis": "^12.2.1",
     "@types/node": "^24.19.2",

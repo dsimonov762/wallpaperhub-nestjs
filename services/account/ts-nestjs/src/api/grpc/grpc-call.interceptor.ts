@@ -10,6 +10,7 @@ import { Observable } from 'rxjs';
 import type { Logger } from 'pino';
 import { AppException } from '../../domain/exceptions/app.exception.js';
 import { LOGGER } from '../../infra/logger.js';
+import { peerIdentity } from './peer-identity.js';
 import { callPrincipal } from '../../security/principal-store.js';
 import { newTraceId, newUuid, traceIdFromTraceparent } from '../../util/ids.js';
 import { type RequestContext, runInContext } from '../http/request-context.js';
@@ -38,6 +39,7 @@ export class GrpcCallInterceptor implements NestInterceptor {
       locale: 'en',
       userId: callPrincipal(metadata)?.userId,
     };
+    const peer = peerIdentity(context.getArgs()[2]);
     const rpc = `${context.getClass().name}.${context.getHandler().name}`;
     const started = performance.now();
     let outcome = 'OK';
@@ -60,6 +62,7 @@ export class GrpcCallInterceptor implements NestInterceptor {
             trace_id: ctx.traceId,
             request_id: ctx.requestId,
             user_id: ctx.userId,
+            peer: peer?.commonName,
             rpc,
             outcome,
             durationMs: Math.round(performance.now() - started),

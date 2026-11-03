@@ -60,6 +60,11 @@ const DEFAULTS: Record<string, string> = {
   CACHE_COOLDOWN_MS: '5000',
   GRPC_ENABLED: 'true',
   GRPC_STREAM_PAGE_SIZE: '500',
+  GRPC_TLS_MODE: 'off',
+  GRPC_TLS_CERT_FILE: '',
+  GRPC_TLS_KEY_FILE: '',
+  GRPC_TLS_CA_FILE: '',
+  GRPC_TLS_ALLOWED_CLIENTS: '',
   JOBS_ENABLED: 'true',
   JOBS_INTERVAL_MINUTES: '60',
   USER_PURGE_AFTER_DAYS: '30',
@@ -84,7 +89,8 @@ const PROFILES: Record<string, Record<string, string>> = {
     KAFKA_BROKERS: 'localhost:9094',
     SCHEMA_REGISTRY_URL: 'http://localhost:8085',
   },
-  prod: {},
+  // Production never serves gRPC in plain text by default: mutual TLS (client certificates) unless configured otherwise.
+  prod: { GRPC_TLS_MODE: 'mtls' },
 };
 
 const port = z.coerce.number().int().min(1).max(65535);
@@ -161,6 +167,11 @@ const schema = z.object({
   CACHE_COOLDOWN_MS: z.coerce.number().int().min(0).max(300000),
   GRPC_ENABLED: z.stringbool(),
   GRPC_STREAM_PAGE_SIZE: z.coerce.number().int().min(1).max(5000),
+  GRPC_TLS_MODE: z.enum(['off', 'tls', 'mtls']),
+  GRPC_TLS_CERT_FILE: z.string(),
+  GRPC_TLS_KEY_FILE: z.string(),
+  GRPC_TLS_CA_FILE: z.string(),
+  GRPC_TLS_ALLOWED_CLIENTS: z.string(),
   JOBS_ENABLED: z.stringbool(),
   JOBS_INTERVAL_MINUTES: z.coerce.number().int().min(1).max(1440),
   USER_PURGE_AFTER_DAYS: z.coerce.number().int().min(1).max(3650),
@@ -247,6 +258,17 @@ export interface AppConfig {
     enabled: boolean;
     /** Rows read from the database per round trip while streaming. */
     streamPageSize: number;
+    tls: {
+      /** off: plain text (development). tls: encrypted, server proves its identity. mtls: clients must present a certificate too. */
+      mode: 'off' | 'tls' | 'mtls';
+      /** PEM files (paths). The server certificate chain and its private key. */
+      certFile: string;
+      keyFile: string;
+      /** PEM file with the certificate authority that signed the CLIENT certificates (mtls only). */
+      caFile: string;
+      /** mtls only: if not empty, only clients whose certificate common name (or DNS name) is listed may connect. */
+      allowedClients: string[];
+    };
   };
   jobs: {
     enabled: boolean;
@@ -317,6 +339,37 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     );
   }
   const c = parsed.data;
+
+  // gRPC transport security: fail fast instead of starting an insecure or half-configured server.
+  if (c.GRPC_ENABLED) {
+    const problems: string[] = [];
+    if (c.APP_PROFILE === 'prod' && c.GRPC_TLS_MODE === 'off') {
+      problems.push(
+        'GRPC_TLS_MODE: the prod profile refuses to serve gRPC in plain text (use tls or mtls, or set GRPC_ENABLED=false)',
+      );
+    }
+    if (c.GRPC_TLS_MODE !== 'off') {
+      if (!c.GRPC_TLS_CERT_FILE)
+        problems.push(
+          `GRPC_TLS_CERT_FILE: required when GRPC_TLS_MODE=${c.GRPC_TLS_MODE}`,
+        );
+      if (!c.GRPC_TLS_KEY_FILE)
+        problems.push(
+          `GRPC_TLS_KEY_FILE: required when GRPC_TLS_MODE=${c.GRPC_TLS_MODE}`,
+        );
+    }
+    if (c.GRPC_TLS_MODE === 'mtls' && !c.GRPC_TLS_CA_FILE) {
+      problems.push(
+        'GRPC_TLS_CA_FILE: required when GRPC_TLS_MODE=mtls (the authority that signs client certificates)',
+      );
+    }
+    if (c.GRPC_TLS_ALLOWED_CLIENTS && c.GRPC_TLS_MODE !== 'mtls') {
+      problems.push(
+        'GRPC_TLS_ALLOWED_CLIENTS: only meaningful with GRPC_TLS_MODE=mtls (without client certificates there is no client identity to check)',
+      );
+    }
+    if (problems.length > 0) throw new ConfigError(problems);
+  }
   const issuer = c.AUTH_ISSUER.replace(/\/+$/, '');
   const fromIssuer = splitIssuer(issuer);
   const keycloakBase = (c.KEYCLOAK_URL || fromIssuer?.baseUrl || '').replace(
@@ -394,7 +447,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       negativeTtlSeconds: c.CACHE_NEGATIVE_TTL_SECONDS,
       cooldownMs: c.CACHE_COOLDOWN_MS,
     },
-    grpc: { enabled: c.GRPC_ENABLED, streamPageSize: c.GRPC_STREAM_PAGE_SIZE },
+    grpc: {
+      enabled: c.GRPC_ENABLED,
+      streamPageSize: c.GRPC_STREAM_PAGE_SIZE,
+      tls: {
+        mode: c.GRPC_TLS_MODE,
+        certFile: c.GRPC_TLS_CERT_FILE,
+        keyFile: c.GRPC_TLS_KEY_FILE,
+        caFile: c.GRPC_TLS_CA_FILE,
+        allowedClients: c.GRPC_TLS_ALLOWED_CLIENTS.split(',')
+          .map((s) => s.trim())
+          .filter(Boolean),
+      },
+    },
     jobs: {
       enabled: c.JOBS_ENABLED,
       intervalMinutes: c.JOBS_INTERVAL_MINUTES,

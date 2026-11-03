@@ -4,8 +4,9 @@ Contract: `contracts/proto/account/v1/account.proto` (the service keeps a verifi
 after editing the contract run `pnpm --filter account-service contracts:sync`). Default port `9090` (`GRPC_PORT`);
 set `GRPC_ENABLED=false` to turn the server off.
 
-**This port is for other services only.** The gateway never routes to it. It speaks plain HTTP/2 without TLS for now
-(mutual TLS between services belongs to the packaging step); keep it on the internal network.
+**This port is for other services only.** The gateway never routes to it. It can be protected in three layers (TLS,
+client certificates with an allowlist, access token); see `docs/TLS.md`. Plain text is the development default; the prod
+profile refuses to start without TLS, and the docker compose stack runs with mutual TLS.
 
 ## Who may call
 
@@ -32,10 +33,10 @@ The same `AppException` that becomes a problem+json response over HTTP becomes a
 | Situation | Status |
 |---|---|
 | missing, invalid or expired token | `UNAUTHENTICATED` |
-| valid token, not a service account | `PERMISSION_DENIED` |
+| valid token, not a service account; or (mTLS) a client certificate that is not on the allowlist | `PERMISSION_DENIED` |
 | unknown user | `NOT_FOUND` |
 | malformed id, too many ids | `INVALID_ARGUMENT` (trailer `x-field-errors`: `[{"field":"id","code":"Pattern"}]`) |
-| database or Keycloak unavailable | `UNAVAILABLE` (safe to retry with backoff) |
+| database or Keycloak unavailable, **or the TLS handshake failed** | `UNAVAILABLE` (safe to retry with backoff; a handshake failure repeats until the certificate problem is fixed) |
 | anything unexpected | `INTERNAL` (no details leak; the trailer `x-trace-id` identifies the log entry) |
 
 Callers should send a deadline, and may send `traceparent` and `x-request-id` metadata: the service continues the trace
@@ -51,5 +52,8 @@ cd services\account\ts-nestjs
 node scripts/grpc-call.mjs ListUsersUpdatedSince --token $T
 node scripts/grpc-call.mjs GetUser --id <a user id> --token $T
 ```
+
+Against a server with TLS (the docker compose stack uses mutual TLS), add the development certificates from
+`pnpm tls:dev-certs`: `--ca ..\..\..\infra\tls\dev\ca.crt --cert ..\..\..\infra\tls\dev\catalog-svc.crt --key ..\..\..\infra\tls\dev\catalog-svc.key`.
 
 Any gRPC tool works too, e.g. `grpcurl -plaintext -proto contracts/proto/account/v1/account.proto -H "authorization: Bearer $T" localhost:9090 wallpaperhub.account.v1.AccountService/GetUser`.

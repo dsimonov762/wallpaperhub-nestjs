@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { AccountGrpcController } from './api/grpc/account.grpc-controller.js';
+import { GrpcTlsStatus } from './api/grpc/tls-status.js';
 import { GrpcCallInterceptor } from './api/grpc/grpc-call.interceptor.js';
 import { UsersModule } from './users.module.js';
 
@@ -8,6 +9,10 @@ import { UsersModule } from './users.module.js';
 @Module({
   imports: [UsersModule],
   controllers: [AccountGrpcController],
-  providers: [{ provide: APP_INTERCEPTOR, useClass: GrpcCallInterceptor }],
+  providers: [
+    GrpcTlsStatus,
+    { provide: APP_INTERCEPTOR, useClass: GrpcCallInterceptor },
+  ],
+  exports: [GrpcTlsStatus],
 })
 export class GrpcModule {}

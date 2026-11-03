@@ -25,8 +25,12 @@ describe('loadConfig', () => {
       KEYCLOAK_CLIENT_SECRET: 's3cret',
       KAFKA_BROKERS: 'k1:9092,k2:9092',
       SCHEMA_REGISTRY_URL: 'https://registry.example.com/',
+      GRPC_TLS_CERT_FILE: '/tls/server.crt',
+      GRPC_TLS_KEY_FILE: '/tls/server.key',
+      GRPC_TLS_CA_FILE: '/tls/ca.crt',
     });
     expect(c.log).toEqual({ level: 'info', pretty: false });
+    expect(c.grpc.tls.mode).toBe('mtls'); // production default: client certificates required
     expect(c.auth.issuer).toBe('https://id.example.com/realms/w');
     expect(c.auth.jwksUrl).toBe(
       'https://id.example.com/realms/w/protocol/openid-connect/certs',
@@ -127,5 +131,87 @@ describe('loadConfig', () => {
     expect(() =>
       loadConfig({ DB_PASSWORD_FILE: '/nope/missing' }),
     ).toThrowError(/unreadable/);
+  });
+
+  describe('gRPC transport security', () => {
+    const prod = {
+      APP_PROFILE: 'prod',
+      DB_PASSWORD: 'x',
+      AUTH_ISSUER: 'https://id.example.com/realms/w',
+      KEYCLOAK_CLIENT_SECRET: 's',
+      KAFKA_BROKERS: 'k:9092',
+      SCHEMA_REGISTRY_URL: 'https://registry.example.com',
+    };
+    const files = {
+      GRPC_TLS_CERT_FILE: '/tls/server.crt',
+      GRPC_TLS_KEY_FILE: '/tls/server.key',
+      GRPC_TLS_CA_FILE: '/tls/ca.crt',
+    };
+
+    it('is plain text in the local profile (development convenience)', () => {
+      expect(loadConfig({}).grpc.tls).toEqual({
+        mode: 'off',
+        certFile: '',
+        keyFile: '',
+        caFile: '',
+        allowedClients: [],
+      });
+    });
+
+    it('prod defaults to mutual TLS and then needs all three files', () => {
+      expect(() => loadConfig(prod)).toThrowError(
+        /GRPC_TLS_CERT_FILE[\s\S]*GRPC_TLS_KEY_FILE[\s\S]*GRPC_TLS_CA_FILE/,
+      );
+      expect(loadConfig({ ...prod, ...files }).grpc.tls).toMatchObject({
+        mode: 'mtls',
+        caFile: '/tls/ca.crt',
+      });
+    });
+
+    it('prod refuses plain text gRPC, unless gRPC is switched off', () => {
+      expect(() => loadConfig({ ...prod, GRPC_TLS_MODE: 'off' })).toThrowError(
+        /refuses to serve gRPC in plain text/,
+      );
+      expect(loadConfig({ ...prod, GRPC_ENABLED: 'false' }).grpc.enabled).toBe(
+        false,
+      );
+    });
+
+    it('tls mode (server authentication only) needs no CA file', () => {
+      const c = loadConfig({
+        ...prod,
+        GRPC_TLS_MODE: 'tls',
+        GRPC_TLS_CERT_FILE: '/c',
+        GRPC_TLS_KEY_FILE: '/k',
+      });
+      expect(c.grpc.tls.mode).toBe('tls');
+    });
+
+    it('parses the client allowlist, and only allows it with mutual TLS', () => {
+      const c = loadConfig({
+        ...prod,
+        ...files,
+        GRPC_TLS_ALLOWED_CLIENTS: ' catalog-svc , notification-svc ,',
+      });
+      expect(c.grpc.tls.allowedClients).toEqual([
+        'catalog-svc',
+        'notification-svc',
+      ]);
+      expect(() =>
+        loadConfig({
+          ...prod,
+          GRPC_TLS_MODE: 'tls',
+          GRPC_TLS_CERT_FILE: '/c',
+          GRPC_TLS_KEY_FILE: '/k',
+          GRPC_TLS_ALLOWED_CLIENTS: 'x',
+        }),
+      ).toThrowError(/GRPC_TLS_ALLOWED_CLIENTS/);
+    });
+
+    it('rejects an unknown mode', () => {
+      expect(() => loadConfig({ GRPC_TLS_MODE: 'maybe' })).toThrowError(
+        /GRPC_TLS_MODE/,
+      );
+    });
   });
 });

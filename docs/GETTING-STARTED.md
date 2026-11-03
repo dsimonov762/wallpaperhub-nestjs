@@ -16,7 +16,7 @@ pnpm 12 refuses to run dependency install scripts unless approved; the three opt
 ## 2. Check the code without any Docker
 
 ```powershell
-pnpm account:test                 # 132 unit tests, a few seconds
+pnpm account:test                     # 150 unit tests, a few seconds
 pnpm --filter account-service check   # typecheck + lint + format + tests
 ```
 
@@ -52,7 +52,7 @@ There are no business endpoints yet (they arrive in step 1.3).
 pnpm --filter account-service test:e2e
 ```
 
-This starts throw-away `postgres:18.6-trixie` and `redis:8.8.3-trixie` containers with Testcontainers and runs 89 tests: migrations,
+This starts throw-away `postgres:18.6-trixie` and `redis:8.10-trixie` containers with Testcontainers and runs 104 tests: migrations,
 the audit trail, the transactional outbox (including two concurrent relays), health, and the whole registration / profile /
 deletion flow (idempotency, rate limiting, optimistic locking, compensation when a step fails). Keycloak is replaced by an
 in-memory fake there.
@@ -69,7 +69,7 @@ the compiled service. The author had **no Docker**, so these have never run; ple
 | 3 | `curl.exe -s http://localhost:8180/realms/wallpaperhub` | JSON describing the realm (the realm import worked; allow ~1 min on first boot) |
 | 4 | Token for a user: `curl.exe -s -X POST http://localhost:8180/realms/wallpaperhub/protocol/openid-connect/token -d grant_type=password -d client_id=dev-cli -d username=admin -d password=admin` | JSON with `access_token` |
 | 5 | Token for a service: same URL with `-d grant_type=client_credentials -d client_id=account-svc -d client_secret=dev-secret-account-svc` | JSON with `access_token`; sending it as `Authorization: Bearer ...` to `http://localhost:8180/admin/realms/wallpaperhub/users` must return a JSON list (proves the service account may manage users) |
-| 6 | `pnpm --filter account-service test:e2e` | 89 passing tests |
+| 6 | `pnpm --filter account-service test:e2e` | 104 passing tests |
 | 7 | With the service running (`pnpm account:dev`) and a user token `$T` from check 4: `curl.exe -s -H "Authorization: Bearer $T" http://localhost:8080/api/v1/whoami` (in PowerShell: `$T = (curl.exe -s -X POST http://localhost:8180/realms/wallpaperhub/protocol/openid-connect/token -d grant_type=password -d client_id=dev-cli -d username=admin -d password=admin \| ConvertFrom-Json).access_token`) | JSON with `roles` containing `ADMIN`, and `permissions` including `users:list`. Without the header: 401 `application/problem+json` |
 | 8 | Same call, but with a token for **`catalog-svc`** (`-d grant_type=client_credentials -d client_id=catalog-svc -d client_secret=dev-secret-catalog-svc`). Not `account-svc`: its own tokens are not meant for account-service (see the note below) | `"service": true`, `roles` containing `internal`. If you get 401 on 7 or 8, run the service with `LOG_LEVEL=debug`: the rejection reason (e.g. `ERR_JWT_CLAIM_VALIDATION_FAILED`) is logged, never sent to the client |
 
@@ -177,7 +177,7 @@ With the service running and a user token `$T` (check 10). The cache is on by de
 | # | Check | Expected |
 |---|---|---|
 | 21 | `pnpm apps:up` (the first build downloads the Node image and installs dependencies: several minutes), then `pnpm apps:ps` | `account-migrate` is `Exited (0)` and `kafka-init` is `Exited (0)`; `account-service` becomes `healthy` within about a minute. If the build fails, send me the last 30 lines of the output |
-| 22 | `pnpm e2e:smoke` | all checks pass (15 with the Kafka check): registration, repeat with the same `Idempotency-Key`, login at Keycloak, profile read and edit, stale-edit refusal, the 401 problem response, **the events reaching Kafka**, deletion. It stops at the first failure and prints the HTTP status and body. If it fails at registration with 503, send me `pnpm apps:logs` |
+| 22 | `pnpm e2e:smoke` | all checks pass (20 with the gRPC and Kafka checks): registration, repeat with the same `Idempotency-Key`, login at Keycloak, profile read and edit, stale-edit refusal, the 401 problem response, **the events reaching Kafka**, deletion. It stops at the first failure and prints the HTTP status and body. If it fails at registration with 503, send me `pnpm apps:logs` |
 | 23 | `docker compose -f infra/docker-compose.yml --profile infra --profile apps exec account-service id`, then `pnpm apps:stop`, then `docker compose -f infra/docker-compose.yml --profile infra --profile apps logs account-service --tail 5` | `uid=1000(node)`, not root; the stop finishes in a few seconds (not after a 10 second kill timeout) and the last log lines include `outbox relay stopped` |
 
 ### Continuous integration (checks 24 and 25)
@@ -188,6 +188,17 @@ Details in `docs/CI.md`. This assumes GitHub; if you use another system, tell me
 |---|---|---|
 | 24 | Put the repository on GitHub (`git init`, `git add .`, commit, push to a new repository) and open its **Actions** tab | the `account-service` workflow runs; after roughly 15 minutes all of `verify`, `integration`, `kafka`, `stack`, `audit` and `CI passed` are green. If a job is red, send me its name and the last 40 lines of its log |
 | 25 | On a new branch, break the contract on purpose: in `contracts/openapi/account.yaml` change `maxLength: 64` of `username` to `maxLength: 80`, push the branch and open a pull request | `verify` fails with the line `POST /registrations requestBody.content.application/json.properties.username.maxLength: contract 80, code 64`, the other jobs do not run, and `CI passed` is red. Then, in Settings, Branches, make `CI passed` a required check for `main` and close the pull request without merging |
+
+### gRPC over mutual TLS (checks 26 to 28)
+
+`pnpm apps:up` now creates development certificates first (`infra/tls/dev/`, git-ignored) and the service runs gRPC with
+mutual TLS. Explanation and troubleshooting: `docs/TLS.md`. Check 22 (`pnpm e2e:smoke`) now also exercises it.
+
+| # | Check | Expected |
+|---|---|---|
+| 26 | `pnpm tls:dev-certs`, then run it a second time | first: eight files created in `infra/tls/dev`; second: "still valid, nothing to do". `pnpm apps:up` (check 21) already ran it, so you may see only the second message |
+| 27 | With the stack up: `curl.exe -s http://localhost:8081/management/tls`, then from `services\account\ts-nestjs` with a service token `$T` (see `docs/GRPC.md`): `node scripts/grpc-call.mjs ListUsersUpdatedSince --token $T --ca ..\..\..\infra\tls\dev\ca.crt --cert ..\..\..\infra\tls\dev\catalog-svc.crt --key ..\..\..\infra\tls\dev\catalog-svc.key` and then the same without `--cert` and `--key` | the management call shows `"mode":"mtls"`, the certificate `CN=account-service` and a `daysLeft` of about 820; the first gRPC call prints users; the second prints `UNAVAILABLE` (no client certificate), and so does a call without any `--ca` option (plain text) |
+| 28 | Misconfiguration drill: `docker compose -f infra/docker-compose.yml --profile infra --profile apps stop account-service`, rename `infra\tls\dev\server.key` to `server.key.bak`, start the service again (`docker compose -f infra/docker-compose.yml --profile infra --profile apps up -d account-service`), look at `pnpm apps:logs`, then rename the file back and start it once more | the service refuses to start and prints `Invalid gRPC TLS configuration:` followed by `GRPC_TLS_KEY_FILE: cannot read "/etc/tls/server.key"`; after restoring the file it becomes `healthy` again |
 
 Dev credentials (local only, never reuse): Keycloak admin console `http://localhost:8180` as `admin` / `admin`;
 realm users `admin` / `admin` and `moderator` / `moderator`; service client secrets `dev-secret-<client>`.

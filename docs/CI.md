@@ -8,7 +8,7 @@ secrets and publishes nothing yet (publishing the image to a registry is a delib
 | `verify` | types, lint, formatting, all unit tests (including that the copied contracts equal `contracts/`), and that the code still matches `contracts/openapi/account.yaml` | 3 min | `pnpm ci:account` |
 | `integration` | the integration tests against real PostgreSQL 17 and Redis 7 (service containers) | 4 min | `pnpm --filter account-service test:e2e` |
 | `kafka` | events reach real Kafka as Avro through Schema Registry (the stack from `infra/docker-compose.yml`) | 5 min | `pnpm infra:up`, then `pnpm --filter account-service test:kafka` |
-| `stack` | Dockerfile lint, compose file valid, the image builds, the whole stack starts, `e2e/smoke-account.mjs` passes | 10 to 15 min | `pnpm apps:up`, then `pnpm e2e:smoke` |
+| `stack` | Dockerfile lint, compose file valid, development certificates generated, the image builds, the whole stack starts (gRPC with mutual TLS), `e2e/smoke-account.mjs` passes | 10 to 15 min | `pnpm apps:up`, then `pnpm e2e:smoke` |
 | `audit` | no known vulnerability of severity high or critical in production dependencies | 1 min | `pnpm --filter account-service exec pnpm audit --prod --audit-level high` |
 | `ci-ok` | one summary job | seconds | |
 

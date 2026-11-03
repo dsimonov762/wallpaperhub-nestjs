@@ -7,6 +7,7 @@ import {
 import { setupHttp } from './api/http/setup-http.js';
 import { setupOpenApi } from './openapi/setup-openapi.js';
 import { attachGrpc } from './api/grpc/setup-grpc.js';
+import { EXPIRY_WARNING_DAYS, TlsConfigError } from './api/grpc/tls.js';
 import { ManagementServer } from './api/http/management.server.js';
 import { HealthService } from './api/http/health.service.js';
 import { AppModule } from './app.module.js';
@@ -56,7 +57,26 @@ async function bootstrap(): Promise<void> {
   // 6. Graceful shutdown on SIGTERM/SIGINT (Docker stop, Ctrl+C): drains, closes DB pool, stops servers.
   app.enableShutdownHooks();
 
-  if (config.grpc.enabled) attachGrpc(app, config);
+  if (config.grpc.enabled) {
+    try {
+      const tls = attachGrpc(app, config);
+      const days = tls?.certificate?.daysLeft;
+      appLogger.info(
+        { mode: config.grpc.tls.mode, certificateDaysLeft: days },
+        'gRPC transport security',
+      );
+      if (days !== undefined && days < EXPIRY_WARNING_DAYS) {
+        appLogger.warn(
+          { daysLeft: days },
+          'the gRPC server certificate expires soon: renew it',
+        );
+      }
+    } catch (e) {
+      if (!(e instanceof TlsConfigError)) throw e;
+      console.error(`Invalid gRPC TLS configuration:\n  - ${e.message}`);
+      process.exit(1);
+    }
+  }
 
   await app.listen(config.http.port, config.http.host);
   await app.get(ManagementServer).start();

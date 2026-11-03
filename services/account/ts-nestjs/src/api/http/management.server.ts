@@ -3,6 +3,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import type { Logger } from 'pino';
 import { APP_CONFIG } from '../../config/config.module.js';
 import type { AppConfig } from '../../config/config.js';
+import { GrpcTlsStatus } from '../grpc/tls-status.js';
 import { ProfileCache } from '../../repository/profile-cache.js';
 import { OutboxMonitor } from '../../jobs/outbox-monitor.js';
 import { LOGGER } from '../../infra/logger.js';
@@ -22,6 +23,7 @@ export class ManagementServer implements BeforeApplicationShutdown {
     private readonly health: HealthService,
     private readonly outbox: OutboxMonitor,
     private readonly cache: ProfileCache,
+    private readonly grpcTls: GrpcTlsStatus,
     @Inject(LOGGER) private readonly logger: Logger,
   ) {}
 
@@ -40,6 +42,10 @@ export class ManagementServer implements BeforeApplicationShutdown {
     // Backlog and relay numbers (never exposed through the gateway: this is the management port).
     server.get('/management/outbox', async () => this.outbox.snapshot());
     server.get('/management/cache', async () => this.cache.stats());
+    // Certificate expiry for monitoring: alert when `daysLeft` gets small.
+    server.get('/management/tls', async () => ({
+      grpc: this.grpcTls.get() ?? { mode: 'off' },
+    }));
     return server;
   }
 

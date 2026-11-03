@@ -13,6 +13,9 @@ import {
   UnauthorizedException,
 } from '../domain/exceptions/app.exception.js';
 import { LOGGER } from '../infra/logger.js';
+import { APP_CONFIG } from '../config/config.module.js';
+import type { AppConfig } from '../config/config.js';
+import { isAllowedPeer, peerIdentity } from '../api/grpc/peer-identity.js';
 import { PERMISSIONS_KEY, PUBLIC_KEY, ROLES_KEY } from './decorators.js';
 import { setCallPrincipal } from './principal-store.js';
 import { type Permission, permissionsOf } from './permissions.js';
@@ -33,6 +36,7 @@ export class AuthGuard implements CanActivate {
     private readonly reflector: Reflector,
     private readonly verifier: TokenVerifier,
     @Inject(LOGGER) private readonly logger: Logger,
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -51,6 +55,19 @@ export class AuthGuard implements CanActivate {
         : undefined;
     const metadata =
       type === 'rpc' ? context.switchToRpc().getContext<Metadata>() : undefined;
+    // gRPC with mutual TLS: the certificate already proved WHO is calling; the allowlist says which services may.
+    // (The access token below is still required: transport identity and caller authorization are separate layers.)
+    if (type === 'rpc' && this.config.grpc.tls.mode === 'mtls') {
+      const peer = peerIdentity(context.getArgs()[2]);
+      if (!isAllowedPeer(peer, this.config.grpc.tls.allowedClients)) {
+        this.logger.warn(
+          { peer: peer?.commonName ?? null },
+          'gRPC client certificate is not on the allowlist',
+        );
+        throw new ForbiddenException();
+      }
+    }
+
     const header = request
       ? request.headers.authorization
       : (metadata?.get('authorization')[0]?.toString() ?? undefined);
