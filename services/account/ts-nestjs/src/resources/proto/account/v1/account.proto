@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package wallpaperhub.account.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// Internal service-to-service API (README 5.4). Callers authenticate with a service-account access token in the
+// `authorization: Bearer <jwt>` metadata entry; the token needs the realm role `internal`.
+// Errors use the standard status codes: UNAUTHENTICATED, PERMISSION_DENIED, NOT_FOUND, INVALID_ARGUMENT, UNAVAILABLE.
+service AccountService {
+  // NOT_FOUND when the user does not exist or was deleted.
+  rpc GetUser(GetUserRequest) returns (User);
+  // Batch lookup: feeds the catalog GraphQL DataLoader (one call instead of N).
+  // Unknown or deleted ids are simply missing from the answer. At most 100 distinct ids.
+  rpc GetUsersByIds(GetUsersByIdsRequest) returns (GetUsersByIdsResponse);
+  // Server-streaming: every user created, changed or deleted at or after `since`, oldest change first.
+  // Deleted users appear once with deleted=true and no personal data. Boundary values may repeat: deduplicate by id.
+  rpc ListUsersUpdatedSince(UpdatedSinceRequest) returns (stream User);
+}
+
+message GetUserRequest { string id = 1; }
+message GetUsersByIdsRequest { repeated string ids = 1; }
+message GetUsersByIdsResponse { repeated User users = 1; }
+message UpdatedSinceRequest { google.protobuf.Timestamp since = 1; }
+
+message User {
+  string id = 1;
+  string username = 2;
+  string display_name = 3;
+  // Empty unless the caller may read emails (the `users:read-email` permission, which `internal` has).
+  string email = 4;
+  string locale = 5;
+  // Empty when the user has no avatar.
+  string avatar_url = 6;
+  google.protobuf.Timestamp updated_at = 7;
+  // True for deleted users; then only `id` and `updated_at` are filled.
+  bool deleted = 8;
+}
