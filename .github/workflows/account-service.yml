@@ -162,7 +162,7 @@ jobs:
       - name: The compose file must be valid
         run: docker compose -f infra/docker-compose.yml --profile infra --profile apps config --quiet
       - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
