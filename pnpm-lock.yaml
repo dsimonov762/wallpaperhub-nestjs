@@ -196,8 +196,8 @@ importers:
         specifier: ^12.0.2
         version: 12.0.2(@nestjs/common@12.2.0(class-transformer@0.5.1)(class-validator@0.15.1)(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.2.0)(reflect-metadata@0.2.2)(rxjs@7.8.2)(typeorm@1.1.2(ioredis@6.0.0)(pg@8.23.1))
       '@platformatic/kafka':
-        specifier: ^2.14.0
-        version: 2.14.0
+        specifier: ^2.15.0
+        version: 2.15.0
       avsc:
         specifier: ^5.7.9
         version: 5.7.9
@@ -1074,8 +1074,8 @@ packages:
     resolution: {integrity: sha512-eCL++LyBjSsqalm4I67dl+gVqLSKd6gPYCieD72S5KqqAkmSAgAYNHt+lL+iVXssWPSfbuIJ5PEwpn5JVD73Xw==}
     engines: {node: '>= 22.19.0'}
 
-  '@platformatic/kafka@2.14.0':
-    resolution: {integrity: sha512-FvPnGuvxk3otCKQL515X1C2yMPAAjlmGEe9JQ2YiKCz0F90K+6zrWhExZ7DCBYIyPfo1O555hsI2D/R2MnmRUQ==}
+  '@platformatic/kafka@2.15.0':
+    resolution: {integrity: sha512-ROhJgOSxJxL9sTOAxDB0cn+VVxQ2LcN3scYR2Eh6Mnhp459a3xeXNHzycARDzvNWKgzHmEhwTga0oAM2v9NYIA==}
     engines: {node: '>= 22.22.0 || >= 24.6.0'}
 
   '@platformatic/wasm-utils@0.3.0':
@@ -3438,7 +3438,7 @@ snapshots:
 
   '@platformatic/dynamic-buffer@0.4.0': {}
 
-  '@platformatic/kafka@2.14.0':
+  '@platformatic/kafka@2.15.0':
     dependencies:
       '@platformatic/dynamic-buffer': 0.4.0
       '@platformatic/wasm-utils': 0.3.0
