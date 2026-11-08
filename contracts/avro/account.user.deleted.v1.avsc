@@ -1,0 +1,10 @@
+{
+  "type": "record",
+  "name": "UserDeleted",
+  "namespace": "dev.wallpaperhub.account.v1",
+  "fields": [
+    { "name": "eventId", "type": "string" },
+    { "name": "userId", "type": "string" },
+    { "name": "occurredAt", "type": { "type": "long", "logicalType": "timestamp-millis" } }
+  ]
+}

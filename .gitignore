@@ -1,0 +1,14 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.env
+!.env.example
+.DS_Store
+*.log
+build/
+patch.json
+register.json
+
+# development-only TLS certificates and PRIVATE KEYS (pnpm tls:dev-certs)
+infra/tls/dev/

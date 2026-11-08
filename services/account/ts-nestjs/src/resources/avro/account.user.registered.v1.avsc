@@ -1,0 +1,13 @@
+{
+  "type": "record",
+  "name": "UserRegistered",
+  "namespace": "dev.wallpaperhub.account.v1",
+  "fields": [
+    { "name": "eventId", "type": "string" },
+    { "name": "userId", "type": "string" },
+    { "name": "username", "type": "string" },
+    { "name": "email", "type": "string" },
+    { "name": "locale", "type": "string", "default": "en" },
+    { "name": "occurredAt", "type": { "type": "long", "logicalType": "timestamp-millis" } }
+  ]
+}

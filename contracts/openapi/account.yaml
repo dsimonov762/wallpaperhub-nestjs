@@ -1,0 +1,278 @@
+openapi: 3.1.0
+info:
+  title: Wallpaper Hub - account-service
+  version: 1.0.0
+  description: |
+    Golden contract (README 5.1 / 5.2). The implementation is generated from code and diffed against this file
+    (`pnpm --filter account-service openapi:check`): a difference in operations, parameters, schemas, response codes,
+    headers or security fails the build. Operations marked `x-implemented: false` are planned and not served yet.
+servers:
+  - url: http://localhost:8080/api/v1
+security:
+  - bearerAuth: []
+paths:
+  /registrations:
+    post:
+      summary: Register a new user (public, rate-limited)
+      security: []
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/AcceptLanguage' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegistrationRequest' }
+      responses:
+        '201':
+          description: Created (or the replayed original response when the same Idempotency-Key is repeated, marked by the Idempotent-Replayed header)
+          headers:
+            Location: { schema: { type: string } }
+            Idempotent-Replayed: { schema: { type: string, enum: ['true'] } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/User' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '429':
+          description: Rate limited (token bucket per client IP)
+          headers:
+            Retry-After: { schema: { type: integer } }
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '503': { $ref: '#/components/responses/Problem' }
+  /users:
+    get:
+      summary: List users (ADMIN)
+      parameters:
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/Size' }
+        - { $ref: '#/components/parameters/Sort' }
+      responses:
+        '200': { description: A page of users, content: { application/json: { schema: { $ref: '#/components/schemas/UserPage' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /users/me:
+    get:
+      summary: Own profile
+      responses:
+        '200':
+          description: OK
+          headers:
+            ETag: { schema: { type: string } }
+            Cache-Control: { schema: { type: string } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/User' } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+    patch:
+      summary: Update own profile (optimistic locking via If-Match)
+      parameters:
+        - name: If-Match
+          in: header
+          required: true
+          description: The ETag of the version being edited, e.g. "3"
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProfilePatch' }
+      responses:
+        '200':
+          description: OK
+          headers:
+            ETag: { schema: { type: string } }
+            Cache-Control: { schema: { type: string } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/User' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /users/me/avatar:
+    put:
+      summary: Link an uploaded media asset as avatar (planned for phase 2, needs media-service)
+      x-implemented: false
+      requestBody: { $ref: '#/components/requestBodies/AssetLink' }
+      responses:
+        '204': { description: No content }
+        '404': { $ref: '#/components/responses/Problem' }
+  /users/me/banner:
+    put:
+      summary: Link an uploaded media asset as banner (planned for phase 2, needs media-service)
+      x-implemented: false
+      requestBody: { $ref: '#/components/requestBodies/AssetLink' }
+      responses:
+        '204': { description: No content }
+        '404': { $ref: '#/components/responses/Problem' }
+  /users/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      summary: Get a user (the email appears only for the owner, administrators and internal services)
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+    delete:
+      summary: Delete a user (the owner, or an administrator)
+      responses:
+        '204': { description: No content }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /whoami:
+    get:
+      summary: Identity, roles and permissions the service derived from your token (learning/debugging aid)
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/WhoAmI' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /auth/refresh:
+    post:
+      summary: Exchange a refresh token (planned, educational endpoint)
+      x-implemented: false
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties: { refreshToken: { type: string } }
+      responses:
+        '200': { description: New tokens }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /auth/logout:
+    post:
+      summary: Revoke a refresh token (planned, educational endpoint)
+      x-implemented: false
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties: { refreshToken: { type: string } }
+      responses:
+        '204': { description: No content }
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: Makes a retry safe. The same key with the same request returns the original response.
+      schema: { type: string, minLength: 1, maxLength: 128, pattern: '^[\w.:-]{1,128}$' }
+    AcceptLanguage:
+      name: Accept-Language
+      in: header
+      required: false
+      description: Language of error messages and the default locale of the new account (en, de, es)
+      schema: { type: string, example: 'de-DE,de;q=0.9' }
+    Page: { name: page, in: query, required: false, schema: { type: integer, minimum: 0, default: 0 } }
+    Size: { name: size, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+    Sort: { name: sort, in: query, required: false, description: 'field,direction; whitelisted per endpoint', schema: { type: string, maxLength: 60, example: 'createdAt,desc' } }
+  requestBodies:
+    AssetLink:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [assetId]
+            properties: { assetId: { type: string, maxLength: 64 } }
+  responses:
+    Problem:
+      description: RFC 9457 problem details (localized by Accept-Language)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Unauthorized:
+      description: Missing, malformed or invalid access token
+      headers:
+        WWW-Authenticate: { schema: { type: string } }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status, detail, instance, traceId]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        traceId: { type: string, pattern: '^[0-9a-f]{32}$' }
+        errors:
+          type: array
+          items: { $ref: '#/components/schemas/FieldError' }
+    FieldError:
+      type: object
+      required: [field, code, message]
+      properties:
+        field: { type: string }
+        code: { type: string }
+        message: { type: string }
+    RegistrationRequest:
+      type: object
+      required: [username, email, password, displayName]
+      properties:
+        username: { type: string, minLength: 3, maxLength: 64, pattern: '^[A-Za-z0-9_]+$' }
+        email: { type: string, format: email, maxLength: 320 }
+        password: { type: string, minLength: 8, maxLength: 128, writeOnly: true }
+        displayName: { type: string, minLength: 1, maxLength: 100 }
+        locale: { type: string, enum: [en, de, es], description: 'Defaults to the language negotiated from Accept-Language, else en' }
+    ProfilePatch:
+      type: object
+      properties:
+        displayName: { type: string, minLength: 1, maxLength: 100 }
+        bio: { type: string, maxLength: 500, description: 'An empty string clears the bio' }
+        locale: { type: string, enum: [en, de, es] }
+    User:
+      type: object
+      required: [id, username, displayName, bio, locale, avatarUrl, bannerUrl, status, createdAt, version]
+      properties:
+        id: { type: string, format: uuid }
+        username: { type: string }
+        email: { type: string, format: email, description: 'Only present for the owner, administrators and internal services' }
+        displayName: { type: string }
+        bio: { type: [string, 'null'] }
+        locale: { type: string, enum: [en, de, es] }
+        avatarUrl: { type: [string, 'null'] }
+        bannerUrl: { type: [string, 'null'] }
+        status: { type: string, enum: [ACTIVE, SUSPENDED] }
+        createdAt: { type: string, format: date-time }
+        version: { type: integer }
+    UserPage:
+      type: object
+      required: [items, page, size, totalItems, totalPages]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/User' } }
+        page: { type: integer }
+        size: { type: integer }
+        totalItems: { type: integer }
+        totalPages: { type: integer }
+    WhoAmI:
+      type: object
+      required: [id, username, roles, permissions, service, clientId, expiresAt]
+      properties:
+        id: { type: string }
+        username: { type: string }
+        roles: { type: array, items: { type: string } }
+        permissions: { type: array, items: { type: string } }
+        service: { type: boolean }
+        clientId: { type: [string, 'null'] }
+        expiresAt: { type: string, format: date-time }
