@@ -1,0 +1,226 @@
+# CI for account-service. The same commands you run locally; nothing here needs secrets.
+#
+#   verify       types, lint, format, unit tests (incl. contract parity), OpenAPI contract check
+#   integration  integration tests against real PostgreSQL and Redis (service containers)
+#   kafka        the real-broker test: Kafka + Schema Registry from infra/docker-compose.yml
+#   stack        builds the Docker image, starts the whole stack, runs e2e/smoke-account.mjs
+#   audit        known vulnerabilities in production dependencies (blocks on "high" or worse)
+#   ci-ok        one summary job: make THIS the required check in branch protection
+#
+# Run the first job's commands on your machine with:  pnpm ci:account
+name: account-service
+
+on:
+  push:
+    branches: [main]
+    paths: &paths
+      - "services/account/**"
+      - "contracts/**"
+      - "infra/**"
+      - "e2e/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".dockerignore"
+      - ".github/workflows/account-service.yml"
+  pull_request:
+    paths: *paths
+  schedule:
+    - cron: "17 4 * * 1" # Mondays: catches dependency and base-image drift even when nobody pushes
+  workflow_dispatch:
+
+# A new push to the same pull request cancels the run that is still going.
+concurrency:
+  group: account-service-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "24" # the Dockerfile uses the same major version
+  TEST_DB_URL: postgres://account:account@localhost:5432/account_test
+  TEST_REDIS_URL: redis://localhost:6379
+
+jobs:
+  verify:
+    name: Check (types, lint, format, unit tests, OpenAPI contract)
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6 # takes the pnpm version from "packageManager" in package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Types, lint, format and unit tests
+        run: pnpm --filter account-service check
+      - name: The generated OpenAPI document must match contracts/openapi/account.yaml
+        run: pnpm --filter account-service openapi:check
+      - name: Keep the generated OpenAPI document for review
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: openapi-generated
+          path: services/account/ts-nestjs/build/openapi/account.generated.yaml
+          if-no-files-found: ignore
+
+  integration:
+    name: Integration tests (PostgreSQL + Redis)
+    needs: verify
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:18.6-trixie
+        env:
+          POSTGRES_USER: account
+          POSTGRES_PASSWORD: account
+          POSTGRES_DB: account_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U account -d account_test"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+      redis:
+        image: redis:8.10-trixie
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Integration tests
+        run: pnpm --filter account-service test:e2e
+
+  kafka:
+    name: Events on real Kafka (Avro + Schema Registry)
+    needs: verify
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:18.6-trixie
+        env:
+          POSTGRES_USER: account
+          POSTGRES_PASSWORD: account
+          POSTGRES_DB: account_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U account -d account_test"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+      redis:
+        image: redis:8.10-trixie
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Start Kafka, Schema Registry and create the topics
+        run: |
+          compose="docker compose -f infra/docker-compose.yml --profile infra"
+          $compose up -d kafka schema-registry kafka-init
+          for _ in $(seq 1 60); do
+            topics=$($compose exec -T kafka kafka-topics --bootstrap-server localhost:9092 --list | grep -c '^account\.user\.' || true)
+            if [ "$topics" -ge 3 ] && curl -sf http://localhost:8085/subjects > /dev/null; then exit 0; fi
+            sleep 2
+          done
+          echo "Kafka or Schema Registry did not become ready" >&2
+          $compose logs --tail 100 kafka schema-registry kafka-init
+          exit 1
+      - name: Real-broker test
+        run: pnpm --filter account-service test:kafka
+      - name: Broker logs on failure
+        if: failure()
+        run: docker compose -f infra/docker-compose.yml --profile infra logs --tail 150 kafka schema-registry
+
+  stack:
+    name: Docker image and full stack smoke test
+    needs: [verify, integration]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Lint the Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: services/account/ts-nestjs/Dockerfile
+      - name: The compose file must be valid
+        run: docker compose -f infra/docker-compose.yml --profile infra --profile apps config --quiet
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Development certificates for the gRPC port (mutual TLS)
+        run: pnpm tls:dev-certs
+      - name: Build the image and start the whole stack
+        run: docker compose -f infra/docker-compose.yml --profile infra --profile apps up -d --build
+      - name: Wait for Keycloak and the service
+        run: |
+          wait_for() {
+            for _ in $(seq 1 90); do
+              if curl -sf "$2" > /dev/null; then echo "$1 is up"; return 0; fi
+              sleep 2
+            done
+            echo "$1 did not come up" >&2
+            return 1
+          }
+          wait_for "Keycloak realm" http://localhost:8180/realms/wallpaperhub
+          wait_for "account-service" http://localhost:8081/health/ready
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Smoke test through the public interfaces (including gRPC over mutual TLS and events reaching Kafka)
+        run: node e2e/smoke-account.mjs
+      - name: Container logs on failure
+        if: failure()
+        run: docker compose -f infra/docker-compose.yml --profile infra --profile apps logs --no-color --tail 200
+      - name: Tear down
+        if: always()
+        run: docker compose -f infra/docker-compose.yml --profile infra --profile apps down -v
+
+  audit:
+    name: Dependency audit (production)
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Known vulnerabilities in production dependencies (fails on high or critical)
+        run: pnpm audit --prod --audit-level high
+
+  ci-ok:
+    name: CI passed
+    if: always()
+    needs: [verify, integration, kafka, stack, audit]
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Every job must have succeeded
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "job results: $RESULTS"
+          for r in $RESULTS; do
+            if [ "$r" != "success" ]; then exit 1; fi
+          done

@@ -1,0 +1,17 @@
+# Weekly pull requests for outdated dependencies. CI (account-service.yml) proves each update before you merge it.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule: { interval: weekly }
+    open-pull-requests-limit: 5
+    groups:
+      nest: { patterns: ["@nestjs/*"] }
+      grpc: { patterns: ["@grpc/*"] }
+      testing: { patterns: ["vitest", "@vitest/*", "testcontainers", "@testcontainers/*"] }
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+  - package-ecosystem: docker
+    directory: /services/account/ts-nestjs
+    schedule: { interval: weekly }

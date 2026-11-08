@@ -1,0 +1,7 @@
+packages:
+  - "services/*/ts-nestjs"
+allowBuilds:
+  '@scarf/scarf': false
+  cpu-features: false
+  protobufjs: false
+  ssh2: false
