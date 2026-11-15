@@ -31,7 +31,7 @@
     "tls:dev-certs": "node scripts/dev-certs.mjs"
   },
   "dependencies": {
-    "@fastify/static": "^10.1.8",
+    "@fastify/static": "^10.1.10",
     "@grpc/grpc-js": "^1.14.7",
     "@grpc/proto-loader": "^0.8.1",
     "@nestjs/common": "^12.2.0",
